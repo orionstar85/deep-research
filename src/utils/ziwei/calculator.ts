@@ -9,6 +9,8 @@
  * - Yin/Yang and Gender logic
  */
 
+import { solarToLunarAccurate } from "./lunarCalendar";
+
 export interface BirthData {
   name: string;
   gender: 'male' | 'female';
@@ -23,6 +25,8 @@ export interface LunarDate {
   day: number;
   isLeapMonth: boolean;
   hourBranch: number; // 0-11 (Zi, Chou, Yin, Mao, Chen, Si, Wu, Wei, Shen, You, Xu, Hai)
+  // Internal tracking for Zi-hour next day shift
+  _isZiHourNextDay?: boolean;
 }
 
 export interface Palace {
@@ -138,32 +142,39 @@ const STEM_YIN_YANG: Record<string, string> = {
 };
 
 /**
- * Convert solar date to lunar date (simplified algorithm)
- * Note: Accurate conversion requires astronomical/ephemeris data
+ * Convert solar date to lunar date using accurate astronomical data
+ * Handles leap months and proper date conversion for 1900-2050
  */
 export function solarToLunar(solarDate: Date): LunarDate {
-  // This is a simplified conversion - in production use astronomical libraries
-  // like 'lunar-javascript' or ephemeris data
-  const year = solarDate.getFullYear();
-  const month = solarDate.getMonth() + 1;
-  const day = solarDate.getDate();
-  
-  // Simplified approximation (accurate conversions need astronomical calculations)
   const hour = solarDate.getHours();
-  const hourBranch = getHourBranch(hour, solarDate.getMinutes());
+  const minute = solarDate.getMinutes();
   
-  // Lunar conversion - simplified algorithm (production should use astronomical libraries)
-  const lunarYear = year; // Simplified - should be calculated properly
-  const lunarMonth = month; // Simplified
-  const lunarDay = day; // Simplified
+  // Handle Zi-hour (23:00-01:00) date shift
+  // In traditional Chinese timekeeping, 23:00-00:00 belongs to next day's Zi hour
+  let adjustedDate = new Date(solarDate);
+  let isZiHourNextDay = false;
+  
+  if (hour === 23 && minute >= 0) {
+    // This is the Zi hour of the NEXT day
+    adjustedDate = new Date(solarDate.getTime() + 24 * 60 * 60 * 1000);
+    isZiHourNextDay = true;
+  }
+  
+  // Get accurate lunar date
+  const lunarData = solarToLunarAccurate(adjustedDate);
+  
+  // Calculate hour branch
+  const hourBranch = getHourBranch(hour, minute);
   
   return {
-    year: lunarYear,
-    month: lunarMonth,
-    day: lunarDay,
-    isLeapMonth: false,
-    hourBranch: hourBranch
-  };
+    year: lunarData.year,
+    month: lunarData.month,
+    day: lunarData.day,
+    isLeapMonth: lunarData.isLeapMonth,
+    hourBranch: hourBranch,
+    // Store original info for reference
+    _isZiHourNextDay: isZiHourNextDay
+  } as LunarDate;
 }
 
 /**
@@ -452,7 +463,9 @@ export function calculateChart(birthData: BirthData): ChartData {
   // Combine all stars
   const allStars = [...mainStars, ...auxiliaryStars, ...minorStars];
   
-  // Create palaces
+  // Create palaces - use the life palace branch index as the anchor
+  // The life palace sits at a specific earthly branch, and all other palaces rotate around it
+  // lifePalace is already the branch index (0-11)
   const palaces = createPalaces(lifePalace, allStars);
   
   // Mark life and body palaces
